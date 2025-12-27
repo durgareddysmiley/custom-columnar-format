@@ -1,124 +1,103 @@
 # Custom Columnar Format (CCF) – Specification
 
-
 ## Overview
 
-This document defines a custom columnar file format called CCF.
-The format is designed to store tabular data in a column-oriented way
-instead of the traditional row-based CSV format.
-
-The main goal is to improve column-wise access and understanding of
-how columnar storage works.
-
+This document defines the custom binary columnar file format (CCF).
+The format is designed to store tabular data in a column-oriented layout
+to enable efficient analytical queries and selective column reads.
 
 ## File Layout
 
-The CCF file is a text-based file.
+The CCF file is a **binary file** with little-endian byte order.
 
-The file is divided into the following sections in order:
+The logical layout is:
 
-1. Header
-2. Schema
-3. Column Data
+1.  **Header** (Fixed size)
+2.  **Schema Definition** (Variable size)
+3.  **Column Metadata Table** (Fixed-size entries per column)
+4.  **Column Data Blocks** (Compressed blobs)
 
-Each section appears exactly once and in the same order.
+---
 
+## 1. Header Structure
 
-## Header Structure
+The header appears at the beginning of the file.
 
-The header appears at the beginning of the file and contains
-basic information about the file.
+| Field | Size | Type | Value / Description |
+| :--- | :--- | :--- | :--- |
+| Magic Number | 4 bytes | Bytes | `CCF1` (0x43 0x43 0x46 0x31) |
+| Version | 1 byte | UInt8 | Format version (Currently 1) |
+| Column Count | 4 bytes | UInt32 | Total number of columns |
+| Row Count | 8 bytes | UInt64 | Total number of rows |
 
-The header includes:
-- Magic string to identify the file format
-- Version number of the format
+---
 
-Format:
-CCF|<version>
+## 2. Schema Metadata
 
-Example:
-CCF|1
-
-
-## Schema Format
-
-The schema defines metadata for each column.
-
-For every column, the following information is stored:
-- Column name
-- Data type
-- Number of values in the column
-
-Each column schema is stored on a separate line.
-
-Format:
-<column_name>|<data_type>|<value_count>
-
-Example:
-id|int|3
-name|string|3
-age|int|3
-
-
-## Supported Data Types
-
-The following data types are supported in version 1:
-
-- int    : Integer values
-- float  : Floating-point values
-- string : Text values
-
-All values are stored in text form.
-
-
-## Column Data Storage
-
-After the schema section, column data is stored.
-
-Data is written column by column, not row by row.
+Immediately following the header is the schema definition, which describes the name and type of each column.
+The schema entries appear in the order of the columns.
 
 For each column:
-- All values of the column are written
-- One value per line
-- Values appear in the same order as in the original CSV
 
-Columns are separated by a blank line.
+| Field | Size | Type | Description |
+| :--- | :--- | :--- | :--- |
+| Name Length | 2 bytes | UInt16 | Length of the column name in bytes |
+| Name | Variable | Bytes | UTF-8 encoded column name |
+| Data Type | 1 byte | UInt8 | `1`=Int, `2`=Float, `3`=String |
 
+---
 
-## Compression Method
+## 3. Column Metadata Table
 
-No compression is applied in version 1 of the format.
+After the schema, there is a reserved table containing location information for each column's data block. This allows O(1) seeking to any column.
 
-All values are stored as plain text.
+For each column (in order):
 
+| Field | Size | Type | Description |
+| :--- | :--- | :--- | :--- |
+| Offset | 8 bytes | UInt64 | Absolute byte offset to the start of the data block |
+| Compressed Size | 8 bytes | UInt64 | Size of the compressed data block in bytes |
+| Uncompressed Size | 8 bytes | UInt64 | Size of the uncompressed data in bytes |
 
-## Endianness
+Total size of this table = `Column Count * 24 bytes`.
 
-Endianness is not applicable because the format is text-based.
+---
 
+## 4. Column Data Blocks
 
-## Complete Example
+The actual data for each column is stored as a contiguous, compressed block.
 
-CSV Input:
-id,name,age
-1,Alice,20
-2,Bob,21
-3,Carol,22
-CCF Output:
-CCF|1
+-   **Compression**: Each block is compressed using **zlib**.
+-   **Storage**: The reader seeks to `Offset` and reads `Compressed Size` bytes.
 
-id|int|3
-name|string|3
-age|int|3
+### Uncompressed Data Layout
 
-1
-2
-3
+Once decompressed, the data is laid out according to its type:
 
-Alice
-Bob
-Carol
+#### Integer (Type 1)
+-   Sequence of 32-bit signed integers (Little Endian).
+-   Size = `Row Count * 4` bytes.
 
-20
-21
-22
+#### Float (Type 2)
+-   Sequence of 64-bit IEEE 754 floating-point numbers (Little Endian).
+-   Size = `Row Count * 8` bytes.
+
+#### String (Type 3)
+-   **Offsets Section**: Sequence of `Row Count` 32-bit unsigned integers. Each integer represents the cumulative end offset of a string in the blob.
+-   **Blob Section**: Concatenated UTF-8 bytes of all strings.
+
+**Example String Decoding**:
+To read the i-th string:
+-   Read `Offset[i]` (End of current string).
+-   Read `Offset[i-1]` (Start of current string, or 0 if i=0).
+-   Slice `Blob[Start:End]`.
+
+---
+
+## Constants
+
+-   **Magic**: `b'CCF1'`
+-   **Version**: `1`
+-   **Type Int**: `1`
+-   **Type Float**: `2`
+-   **Type String**: `3`

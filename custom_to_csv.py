@@ -1,98 +1,69 @@
-import struct
-import zlib
-import csv
 import sys
+import os
+import csv
 import argparse
+from reader import CCFReader
 
-MAGIC = b'CCF1'
+def convert_ccf_to_csv(ccf_path, csv_path, columns=None):
+    if not os.path.exists(ccf_path):
+        print(f"Error: Input file '{ccf_path}' not found.")
+        sys.exit(1)
 
-TYPE_INT = 1
-TYPE_FLOAT = 2
-TYPE_STRING = 3
-
-
-def read_custom(file_path, selected=None):
-    with open(file_path, 'rb') as f:
-
-        if f.read(4) != MAGIC:
-            raise ValueError("Invalid file format")
-
-        version = struct.unpack('<B', f.read(1))[0]
-        ncols = struct.unpack('<I', f.read(4))[0]
-        nrows = struct.unpack('<Q', f.read(8))[0]
-
-        schema = []
-        for _ in range(ncols):
-            l = struct.unpack('<H', f.read(2))[0]
-            name = f.read(l).decode()
-            dtype = struct.unpack('<B', f.read(1))[0]
-            schema.append((name, dtype))
-
-        meta = {}
-        for name, dtype in schema:
-            off, cs, us = struct.unpack('<QQQ', f.read(24))
-            meta[name] = (off, cs, us, dtype)
-
-        if selected is None:
-            selected = [name for name, _ in schema]
-
-        data = {}
-
-        for name in selected:
-            off, cs, _, dtype = meta[name]
-            f.seek(off)
-            raw = zlib.decompress(f.read(cs))
-
-            values = []
-
-            if dtype == TYPE_INT:
-                for i in range(nrows):
-                    values.append(struct.unpack_from('<i', raw, i * 4)[0])
-
-            elif dtype == TYPE_FLOAT:
-                for i in range(nrows):
-                    values.append(struct.unpack_from('<d', raw, i * 8)[0])
-
-            else:
-                pos = 0
-                offsets = []
-                for _ in range(nrows):
-                    offsets.append(struct.unpack_from('<I', raw, pos)[0])
-                    pos += 4
-                blob = raw[pos:]
-
-                s = 0
-                for e in offsets:
-                    values.append(blob[s:e].decode())
-                    s = e
-
-            data[name] = values
-
-        return data, nrows
-
-
-def write_csv(out_file, data, nrows):
-    headers = list(data.keys())
-
-    with open(out_file, 'w', newline='', encoding='utf-8') as f:
-        w = csv.writer(f)
-        w.writerow(headers)
-        for i in range(nrows):
-            w.writerow([data[h][i] for h in headers])
-
+    print(f"Converting '{ccf_path}' to '{csv_path}'...")
+    
+    try:
+        reader = CCFReader(ccf_path)
+        
+        # Determine columns to read
+        if columns:
+            cols_to_read = columns
+        else:
+            cols_to_read = [name for name, _ in reader.schema]
+            
+        vals = reader.read_columns(cols_to_read)
+        nrows = reader.nrows
+        
+        # Write CSV
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            csv_writer = csv.writer(f)
+            csv_writer.writerow(cols_to_read)
+            
+            for i in range(nrows):
+                row = []
+                for h in cols_to_read:
+                    if h in vals and i < len(vals[h]):
+                        row.append(str(vals[h][i]))
+                    else:
+                        row.append("")
+                csv_writer.writerow(row)
+        print("Conversion successful.")
+        
+    except Exception as e:
+        print(f"Error during conversion: {e}")
+        sys.exit(1)
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("input")
-    parser.add_argument("output")
-    parser.add_argument("--columns")
+    parser = argparse.ArgumentParser(description="Convert CCF file to CSV.")
+    parser.add_argument("input", help="Path to input .ccf file")
+    parser.add_argument("output", help="Path to output .csv file")
+    parser.add_argument("--columns", help="Comma-separated list of columns to extract")
+    
     args = parser.parse_args()
-
+    
     cols = args.columns.split(",") if args.columns else None
+    convert_ccf_to_ccf(args.input, args.output, cols)
 
-    data, nrows = read_custom(args.input, cols)
-    write_csv(args.output, data, nrows)
-
+# Fix function call name typo in main
+def run():
+    parser = argparse.ArgumentParser(description="Convert CCF file to CSV.")
+    parser.add_argument("input", help="Path to input .ccf file")
+    parser.add_argument("output", help="Path to output .csv file")
+    parser.add_argument("--columns", help="Comma-separated list of columns to extract (e.g. 'name,age')")
+    
+    args = parser.parse_args()
+    
+    cols = args.columns.split(",") if args.columns else None
+    convert_ccf_to_csv(args.input, args.output, cols)
 
 if __name__ == "__main__":
-    main()
+    run()
