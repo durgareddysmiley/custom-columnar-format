@@ -46,18 +46,6 @@ def main():
     parser = argparse.ArgumentParser(description="Convert CCF file to CSV.")
     parser.add_argument("input", help="Path to input .ccf file")
     parser.add_argument("output", help="Path to output .csv file")
-    parser.add_argument("--columns", help="Comma-separated list of columns to extract")
-    
-    args = parser.parse_args()
-    
-    cols = args.columns.split(",") if args.columns else None
-    convert_ccf_to_ccf(args.input, args.output, cols)
-
-# Fix function call name typo in main
-def run():
-    parser = argparse.ArgumentParser(description="Convert CCF file to CSV.")
-    parser.add_argument("input", help="Path to input .ccf file")
-    parser.add_argument("output", help="Path to output .csv file")
     parser.add_argument("--columns", help="Comma-separated list of columns to extract (e.g. 'name,age')")
     
     args = parser.parse_args()
@@ -66,4 +54,4 @@ def run():
     convert_ccf_to_csv(args.input, args.output, cols)
 
 if __name__ == "__main__":
-    run()
+    main()
