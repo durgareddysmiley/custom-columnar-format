@@ -1,22 +1,31 @@
 import struct
 import zlib
+from typing import List, Dict, Any, Optional
 from constants import MAGIC, VERSION, TYPE_INT, TYPE_FLOAT, TYPE_STRING, TYPE_MAP
 from exceptions import CCFMagicError, CCFVersionError, CCFColumnError, CCFError
 
 class CCFReader:
-    def __init__(self, file_path):
+    """
+    Reader class for the Custom Columnar Format (CCF).
+    Supports full file reading and selective column access (pruning).
+    """
+    def __init__(self, file_path: str):
         self.file_path = file_path
-        self.header = {}
-        self.schema = [] # List of (name, dtype)
-        self.col_meta = {} # name -> (offset, csize, usize)
-        self.nrows = 0
+        self.header: Dict[str, Any] = {}
+        self.schema: List[tuple] = [] # List of (name, dtype)
+        self.col_meta: Dict[str, tuple] = {} # name -> (offset, csize, usize, dtype)
+        self.nrows: int = 0
 
         try:
             self._load_metadata()
         except (IOError, OSError) as e:
             raise CCFError(f"Failed to open or read file '{file_path}': {e}") from e
 
-    def _load_metadata(self):
+    def _load_metadata(self) -> None:
+        """
+        Internal method to read and validate the file header, schema, and metadata table.
+        Optimized to read only the metadata section, not data blocks.
+        """
         with open(self.file_path, 'rb') as f:
             magic = f.read(4)
             if magic != MAGIC:
@@ -54,11 +63,19 @@ class CCFReader:
                 offset, csize, usize = struct.unpack('<QQQ', meta_bytes)
                 self.col_meta[name] = (offset, csize, usize, dtype)
 
-    def read_columns(self, columns=None):
+    def read_columns(self, columns: Optional[List[str]] = None) -> Dict[str, List[Any]]:
         """
-        Reads specified columns.
-        columns: list of names. If None, reads all.
-        Returns: dict {col_name: [values]}
+        Reads specified columns from the file.
+        
+        Args:
+            columns: List of column names to read. If None, reads all columns.
+            
+        Returns:
+            Dictionary mapping column names to lists of values.
+            
+        Raises:
+            CCFColumnError: If a requested column does not exist.
+            CCFError: If data corruption or IO errors occur.
         """
         if columns is None:
             columns = [name for name, _ in self.schema]
@@ -87,9 +104,6 @@ class CCFReader:
                         raise CCFError(f"Decompression failed for column '{name}': {e}")
                     
                     if len(raw_data) != usize:
-                         # Warn or error if size mismatch?
-                         # For strict correctness, let's warn but proceed, or raise. 
-                         # Let's verify strictly.
                          if len(raw_data) != usize:
                              raise CCFError(f"Size mismatch for column '{name}': expected {usize}, got {len(raw_data)}")
 
@@ -100,7 +114,11 @@ class CCFReader:
         
         return result
 
-    def _parse_column(self, raw_bytes, dtype, userid_nrows):
+    def _parse_column(self, raw_bytes: bytes, dtype: int, userid_nrows: int) -> List[Any]:
+        """
+        Internal method to parse raw decompressed bytes into a list of values 
+        according to the column type.
+        """
         values = []
         if dtype == TYPE_INT:
             expected_size = userid_nrows * 4

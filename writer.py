@@ -1,10 +1,19 @@
 import struct
 import zlib
+from typing import List, Any
 from constants import MAGIC, VERSION, TYPE_INT, TYPE_FLOAT, TYPE_STRING
 from exceptions import CCFError
 
-def infer_type(value):
-    """Infer the data type of a single string value."""
+def infer_type(value: str) -> int:
+    """
+    Infer the data type of a single string value.
+    
+    Args:
+        value: The string value to inspect.
+        
+    Returns:
+        One of TYPE_INT, TYPE_FLOAT, or TYPE_STRING.
+    """
     try:
         int(value)
         return TYPE_INT
@@ -20,12 +29,20 @@ def infer_type(value):
     return TYPE_STRING
 
 
-def resolve_column_type(values):
+def resolve_column_type(values: List[str]) -> int:
     """
-    Resolve the type for a whole column.
-    If any value is float, the column is float.
-    If any value is string, the column is string.
-    Otherwise int.
+    Resolve the type for a whole column based on its values.
+    
+    Logic:
+    - If any value is a string that cannot be parsed as number, the whole column is STRING.
+    - If any value is a float (and no strings), the whole column is FLOAT.
+    - Otherwise, if all are integers, the column is INT.
+    
+    Args:
+        values: List of string values for the column.
+        
+    Returns:
+        The resolved type ID for the column.
     """
     current_type = TYPE_INT
     for v in values:
@@ -38,14 +55,23 @@ def resolve_column_type(values):
 
 
 class CCFWriter:
-    def __init__(self, output_file):
+    """
+    Writer class for the Custom Columnar Format (CCF).
+    Handles serialization of tabular data into a compressed, columnar binary format.
+    """
+    def __init__(self, output_file: str):
         self.output_file = output_file
 
-    def write(self, headers, rows):
+    def write(self, headers: List[str], rows: List[List[str]]) -> None:
         """
         Writes data to the CCF file.
-        headers: list of strings
-        rows: list of lists of strings (as read from CSV)
+        
+        Args:
+            headers: List of column names.
+            rows: List of rows, where each row is a list of string values (as read from CSV).
+            
+        Raises:
+            IOError: If file writing fails.
         """
         if not rows:
              # Handle empty case: create a dummy file with no rows
